@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Tähän joku hyvä nimi</title>
+	<link rel="shortcut icon" href="img/favicon.ico" type="image/x-icon">
+	<link rel="stylesheet" href="./style.css" type="text/css">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" referrerpolicy="no-referrer"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js" integrity="sha512-3WaCYjK/lQuL0dVIRt1thLXr84Z/4Yppka6u40yEJT1QulYm9pCxguF6r8V84ndP5K03koI9hV1+zo/bUbgMtA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+
+	<header>
+		<h1>Paina tallennuksen aloitus nappia ja lue alla oleva sana tai vokaali mikrofoniin</h1>
+	</header>
+	<section id="wordDisplay">
+		<div id="word"></div>
+	</section>
+	<div class="tool-bar">
+		<div class="tool-btn hidden" id="btnCancel">
+			<div class="cross hidden"></div>
+			<div class="cross hidden"></div>
+		</div>
+		<div class="tool-btn" id="btnStart"></div>
+		<div class="tool-btn hidden" id="recordingDot"></div>
+		<div class="tool-btn hidden" id="btnStop">
+			<div class="rectangle hidden"></div>
+		</div>
+	</div>
+	<section class="audio-controls hidden">
+		<audio controls preload="none" class="audio-element"></audio>
+		<div id="downloadBtn">
+			<img src="img/download.png" alt="Download">
+		</div>
+	</section>
+
+<script src="js/audio-recordingAPI.js"></script>
+<script src="js/words.js"></script>
+<script>
+	var startRecordBtn = document.getElementById("btnStart");
+	var stopRecordBtn = document.getElementById("btnStop");
+	var cancelRecordBtn = document.getElementById("btnCancel");
+	var recordingDot  = document.getElementById("recordingDot");
+	var downloadBtn = document.getElementById("downloadBtn");
+	var crosses = document.querySelectorAll(".cross");
+	var rect = document.querySelector(".rectangle");
+	var audioElement = document.getElementsByClassName("audio-element")[0];
+	var audioDownloadLink = document.getElementsByClassName("download-link")[0];
+	var audioControls = document.querySelector(".audio-controls");
+	var audioElementSource = document.getElementsByClassName("audio-element")[0].getElementsByTagName("source")[0];
+	var headerText = document.querySelector("header h1");
+	var wordDisplay = document.getElementById("wordDisplay");
+	var audioBlobRef = null;
+	var audio64 = null;
+	var jsonData = [];
+	var jsonStr = null;
+	var startTime = 0;
+	var timeElapsed = 0;
+	var recording = false;
+	var BlobType = null;
+
+	startRecordBtn.addEventListener(("click"), () => {
+		recording = true;
+		toggleButtons();
+		startAudioRecording();
+		audioControls.classList.add("hidden");
+		headerText.innerHTML = "Painamalla alla olevaa sanaa, saat seuraavan sanan tai vokaalin."
+	});
+
+	stopRecordBtn.addEventListener(("click"), () => {
+		recording = false;
+		toggleButtons();
+		stopAudioRecording();
+		audioControls.classList.remove("hidden");
+		headerText.innerHTML = "Lataa zip tiedosto latauspainikkeesta tai aloita uusi äänitys painamalla record nappia";
+	});
+
+	cancelRecordBtn.addEventListener(("click"), () => {
+		recording = false;
+		toggleButtons();
+		cancelAudioRecording();
+		headerText.innerHTML = "Paina tallennuksen aloitus nappia ja lue alla oleva sana mikrofoniin";
+	});
+
+
+	//Kuuntelija sanan vaihtumiselle
+	wordDisplay.onclick = (e) => {
+		if (recording)
+			pushToJSONData();
+	};
+
+	//Lisätään äänityksen alusta kulunut aika ja tämän hetkinen sana jsonData arrayhyn
+	function pushToJSONData() {
+		let word = document.getElementById("word").innerHTML;
+		var now = Math.floor(Date.now());
+		timeElapsed = now - startTime;
+		jsonData.push({time: timeElapsed, word: word});
+	}
+
+	//Säätää painikkeiden näkyvyyttä
+	function toggleButtons() {
+		startRecordBtn.classList.toggle("hidden");
+		recordingDot.classList.toggle("hidden");
+		stopRecordBtn.classList.toggle("hidden");
+		crosses.forEach((cross) => cross.classList.toggle("hidden"));
+		cancelRecordBtn.classList.toggle("hidden");
+		rect.classList.toggle("hidden");
+	}
+
+
+	function createSourceForAudioElement() {
+		let sourceElement = document.createElement("source");
+		audioElement.appendChild(sourceElement);
+
+		audioElementSource = sourceElement;
+	}
+
+	//Kuuntelija latauspainikkeelle. Luodaan zippi ja lisätään sinne JSON ja audio tiedostot
+	downloadBtn.addEventListener("click", function () {
+		if (audioBlobRef == null) {
+			return;
+		}
+		var zip = new JSZip();
+		zip.file("data.json", jsonStr);
+		console.log(BlobType);
+		JSZipUtils.getBinaryContent(audio64, function (err, data) {
+			if(err) {
+			throw err;
+			}
+			zip.file("audio."+BlobType.substring(BlobType.indexOf("/")+1), data, {binary:true});
+			zip.generateAsync({ type: "blob" }).then(function(content) {
+				saveAs(content, "recording.zip");
+			});
+		});
+	});
+
+	//Alustetaan muuttujat ja JSONdata ja aloitetaan tallennus audio-recordingAPI:lla (audioRecorder.start()).
+	function startAudioRecording() {
+		audioBlobRef = null;
+		jsonData = [];
+		jsonStr = null;
+		timeElapsed = null;
+		audio64 = null;
+		startTime = Math.floor(Date.now());
+		pushToJSONData();
+		audioRecorder.start()
+			.then(() => {
+				//Onnistunut aloitus
+				console.log("Recording Audio...")
+			})
+			//Error handling
+			.catch(error => {
+				//Selain ei tue
+				if (error.message.includes("mediaDevices API or getUserMedia method is not supported in this browser.")) {
+					console.log("To record audio, use browsers like Chrome and Firefox.")
+				}
+				//Muut errorit
+				switch (error.name) {
+					case 'AbortError':
+						console.log("An AbortError has occured.");
+						break;
+					case 'NotAllowedError':
+						console.log("A NotAllowedError has occured. User might have denied permission.");
+						break;
+					case 'NotFoundError':
+						console.log("A NotFoundError has occured.");
+						break;
+					case 'NotReadableError':
+						console.log("A NotReadableError has occured.");
+						break;
+					case 'SecurityError':
+						console.log("A SecurityError has occured.");
+						break;
+					case 'TypeError':
+						console.log("A TypeError has occured.");
+						break;
+					case 'InvalidStateError':
+						console.log("An InvalidStateError has occured.");
+						break;
+					case 'UnknownError':
+						console.log("An UnknownError has occured.");
+						break;
+					default:
+						console.log("An error occured with the error name " + error.name);
+				};
+			});
+	}
+
+	//Pysäytetään äänitys ja luodaan JSON tiedosto
+	function stopAudioRecording() {
+		console.log("Stopping audio recording...");
+		console.log(jsonData);
+		jsonStr = JSON.stringify(jsonData);
+		audioRecorder.stop()
+			.then(audioAsblob => {
+				createAudio(audioAsblob);
+				audioBlobRef = audioAsblob;
+				audioElement.load();
+			})
+
+			.catch(error => {
+				switch (error.name) {
+					case 'InvalidStateError':
+						console.log("An InvalidStateError has occured.");
+						break;
+					default:
+						console.log("An error occured with the error name " + error.name);
+				};
+			});
+	}
+
+
+	function createAudio(recorderAudioAsBlob) {
+		let reader = new FileReader();
+
+		reader.onload = (e) => {
+			//säilötään äänitteen base64 URL
+			let base64URL = e.target.result;
+			audio64 = base64URL;
+
+			//Jos ensimmäinen äänitys, luodaan source elementti audiolle
+			//erroreiden välttämiseksi
+			if (!audioElementSource)
+				createSourceForAudioElement();
+
+			//asetetaan lähteeksi base64 url
+			audioElementSource.src = base64URL;
+
+			//asetetaan audio elementin tyyppi äänitetyn blobin mukaiseksi
+			BlobType = recorderAudioAsBlob.type.includes(";") ?
+				recorderAudioAsBlob.type.substr
+				(0, recorderAudioAsBlob.type.indexOf(';')) : recorderAudioAsBlob.type;
+			audioElementSource.type = BlobType;
+			console.log(BlobType);
+
+			//Päivitetään audio elementti muutosten jälkeen
+			audioElement.load();
+		};
+
+		reader.readAsDataURL(recorderAudioAsBlob);
+	}
+
+	//Perutaan äänitys ja nollataan muuttujat
+	function cancelAudioRecording() {
+		console.log("Cancelling audio recording...");
+		audioRecorder.cancel();
+		jsonData = [];
+		jsonStr = null;
+		startTime = null;
+		timeElapsed = null;
+	}
+
+</script>
+</body>
+</html>
